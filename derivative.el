@@ -1,7 +1,7 @@
 ;;; -*- lexical-binding: t; -*-
 
 (require 'dash)
-(require 'lazy-struct "~/Development/derivative.el/lazy-struct.el")
+(require 'lazy-struct "~/Research/derivative.el/lazy-struct.el")
 
 (lazy-struct d/empty nil)
 (lazy-struct d/eps nil)
@@ -9,7 +9,7 @@
 (lazy-struct d/rep nil lang)
 (lazy-struct d/cat nil left right)
 (lazy-struct d/alt nil this that)
-(lazy-struct d/rec t item)
+(lazy-struct d/rec nil item)
 
 ;; (cl-defstruct d/empty)
 ;; (cl-defstruct d/eps)
@@ -36,6 +36,7 @@
 (defun d/infer (obj)
   (cl-typecase obj
     (d/langp obj)
+    (symbolp (d/rec obj))
     (characterp (d/char (string obj)))
     (stringp (make-word-L obj))))
 
@@ -142,9 +143,41 @@
 
 (letrec ((id (c-alt ?a ?b))
 	 (expr (c-alt id
-		      (c-wscat (d/rec expr) "+" (d/rec expr)))))
+		      (c-wscat (d/rec 'expr) "+" (d/rec 'expr)))))
   (check-word "a + a" expr)
   )
+
+(setq x '(+ x 1))
+(eval x '((x . 0)))
+
+(defun unwind (var expr root-expr)
+  (cl-typecase expr
+    (d/empty expr)
+    (d/eps expr)
+    (d/char expr)
+    (d/rep (d/rep (unwind var (d/rep-lang expr) root-expr)))
+    (d/cat (d/cat (unwind var (d/cat-left expr) root-expr)
+		  (unwind var (d/cat-right expr) root-expr)))
+    (d/alt (d/alt (unwind var (d/alt-this expr) root-expr)
+		  (unwind var (d/alt-that expr) root-expr)))
+    (d/rec (if (equal (d/rec-item expr) var)
+	       root-expr
+	     expr))))
+
+(defun unwind-n (var n expr)
+  (if (zerop n)
+      expr
+    (unwind var (unwind-n var (- n 1) expr) expr)))
+
+(let* ((id (c-alt ?a ?b ?c))
+       (expr (c-alt id
+		    (c-wscat 'expr "+" 'expr))))
+  ;; (unwind-n 'var 1 var)
+  (check-word "a + a + a"
+	      (unwind-n 'expr 2 expr))
+  ;; expr
+  )
+
 
 
 (letrec ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))

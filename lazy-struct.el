@@ -19,6 +19,9 @@
 	  fields))))
 
 (macroexpand
- '(lazy-struct my/test nil a b))
+ '(lazy-struct my/test t a))
+
+(lazy-struct my/test t a)
+(my/test-a (my/test 'y))
 
 (provide 'lazy-struct)
