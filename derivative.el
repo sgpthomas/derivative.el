@@ -1,13 +1,22 @@
 ;;; -*- lexical-binding: t; -*-
 
 (require 'dash)
+(require 'lazy-struct "~/Development/derivative.el/lazy-struct.el")
 
-(cl-defstruct d/empty)
-(cl-defstruct d/eps)
-(cl-defstruct d/char value)
-(cl-defstruct d/rep lang)
-(cl-defstruct d/cat left right)
-(cl-defstruct d/alt this that)
+(lazy-struct d/empty nil)
+(lazy-struct d/eps nil)
+(lazy-struct d/char nil value)
+(lazy-struct d/rep nil lang)
+(lazy-struct d/cat nil left right)
+(lazy-struct d/alt nil this that)
+(lazy-struct d/rec t item)
+
+;; (cl-defstruct d/empty)
+;; (cl-defstruct d/eps)
+;; (cl-defstruct d/char value)
+;; (cl-defstruct d/rep lang)
+;; (cl-defstruct d/cat left right)
+;; (cl-defstruct d/alt this that)
 
 (defun d/langp (obj)
   (or (d/empty-p obj)
@@ -15,18 +24,19 @@
       (d/char-p obj)
       (d/rep-p obj)
       (d/cat-p obj)
-      (d/alt-p obj)))
+      (d/alt-p obj)
+      (d/rec-p obj)))
 
 (defun make-word-L (word)
   (if (not (equal word ""))
-      (make-d/cat :left (make-d/char :value (substring word 0 1))
-		  :right (make-word-L (substring word 1 (string-width word))))
-    (make-d/eps)))
+      (d/cat (d/char (substring word 0 1))
+	     (make-word-L (substring word 1 (string-width word))))
+    (d/eps)))
 
 (defun d/infer (obj)
   (cl-typecase obj
     (d/langp obj)
-    (characterp (make-d/char :value (string obj)))
+    (characterp (d/char (string obj)))
     (stringp (make-word-L obj))))
 
 (defun nullable (L)
@@ -38,33 +48,36 @@
     (d/alt (or (nullable (d/alt-this L))
 	       (nullable (d/alt-that L))))
     (d/cat (and (nullable (d/cat-left L))
-		(nullable (d/cat-right L))))))
+		(nullable (d/cat-right L))))
+    (d/rec (nullable (d/rec-item L)))))
 
 (defun derivative (c L)
   (cl-typecase L
-    (d/empty (make-d/empty))
-    (d/eps (make-d/empty))
+    (d/empty (d/empty))
+    (d/eps (d/empty))
     (d/char (if (equal c (d/char-value L))
-		(make-d/eps)
-	      (make-d/empty)))
-    (d/rep (make-d/cat :left (derivative c (d/rep-lang L))
-		       :right L))
+		(d/eps)
+	      (d/empty)))
+    (d/rep (d/cat (derivative c (d/rep-lang L))
+		  L))
     (d/alt
      (let ((l1 (d/alt-this L))
 	   (l2 (d/alt-that L)))
-       (make-d/alt :this (derivative c l1)
-		   :that (derivative c l2))))
+       (d/alt (derivative c l1)
+	      (derivative c l2))))
     (d/cat
      (let ((l1 (d/cat-left L))
 	   (l2 (d/cat-right L)))
        (if (not (nullable l1))
-	   (make-d/cat :left (derivative c l1)
-		       :right l2)
-	 (make-d/alt :this (make-d/cat :left (derivative c l1)
-				       :right l2)
-		     :that (derivative c l2)))))))
-
-
+	   (d/cat (derivative c l1)
+		  l2)
+	 (d/alt (d/cat (derivative c l1)
+		       l2)
+		(derivative c l2)))))
+    (d/rec
+     (progn
+       (message "L: %s" L)
+       (derivative c (d/rec-item L))))))
 
 (defun check-word (word L)
   (if (equal word "")
@@ -75,55 +88,46 @@
 
 (check-word "hello" (make-word-L "hello"))
 
-(setq L (make-d/cat :left L
-		    :right (make-d/alt :this (make-d/char :value "a")
-				       :that (make-d/char :value "b"))))
+;; (setq L (make-d/cat :left L
+;; 		    :right (make-d/alt :this (make-d/char :value "a")
+;; 				       :that (make-d/char :value "b"))))
 
-(define-lang L
-  ;; (abs (cat (word "lambda")
-  ;; 	    binder
-  ;; 	    (word ".")
-  ;; 	    expr))
-  (id (alt (word "a")
-	   (word "b")
-	   (word "c")
-	   (word "x")
-	   (word "y")
-	   (word "z")))
-  (ws (word " "))
-  (binder (cat id (rep (cat ws id))))
-  )
+;; (define-lang L
+;;   ;; (abs (cat (word "lambda")
+;;   ;; 	    binder
+;;   ;; 	    (word ".")
+;;   ;; 	    expr))
+;;   (id (alt (word "a")
+;; 	   (word "b")
+;; 	   (word "c")
+;; 	   (word "x")
+;; 	   (word "y")
+;; 	   (word "z")))
+;;   (ws (word " "))
+;;   (binder (cat id (rep (cat ws id))))
+;;   )
 
 (defun c-alt (&rest args)
   (if (consp args)
-      (make-d/alt :this (d/infer (car args))
-		  :that (apply 'c-alt (cdr args)))
-    (make-d/eps)))
+      (d/alt (d/infer (car args))
+	     (apply 'c-alt (cdr args)))
+    (d/eps)))
 
 (defun c-cat (&rest args)
   (if (consp args)
-      (make-d/cat :left (d/infer (car args))
-		  :right (apply 'c-cat (cdr args)))
-    (make-d/eps)))
+      (d/cat (d/infer (car args))
+	     (apply 'c-cat (cdr args)))
+    (d/eps)))
 
 (defun c-wscat (&rest args)
   (apply 'c-cat (-interpose " " args)))
 
 (defun c-* (L)
-  (make-d/rep :lang L))
+  (d/rep L))
 
 (check-word
  "lambda x . x"
  (c-wscat "lambda" ?x  "." ?x))
-
-(c-alt ?a ?b ?c)
-
-(c-alt (make-d/char :value "a"))
-
-(apply 'c-alt (list (make-d/char :value "a")
-		    (make-d/char :value "b")
-		    (make-d/char :value "c")))
-
 
 (setq L
       (let* ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
@@ -131,11 +135,17 @@
 	     (binder (c-cat id (c-* (c-cat ws id))))
 	     (plus (c-wscat id "+" id))
 	     (minus (c-wscat id "-" id))
-	     (expr (c-alt plus minus))
-	     )
+	     (expr (c-alt plus minus)))
 	;; (c-cat id (c-* (c-cat ws id)))
 	(c-wscat "lambda" binder "." expr)
 	))
+
+(letrec ((id (c-alt ?a ?b))
+	 (expr (c-alt id
+		      (c-wscat (d/rec expr) "+" (d/rec expr)))))
+  (check-word "a + a" expr)
+  )
+
 
 (letrec ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
 	 (plus (c-wscat expr "+" expr))
@@ -144,17 +154,6 @@
   plus
   )
 
-
 (check-word "lambda f x y . x + y" L)
-
-lambda x y . x + x
-
-(--> (make-word-L "hell")
-     (derivative "h" it)
-     (derivative "e" it)
-     (derivative "l" it)
-     (derivative "l" it)
-     ;; (derivative "o" it)
-     )
 
 (provide 'derivative)

@@ -1,46 +1,24 @@
 ;;; -*- lexical-binding: t; -*-
 
-()
+(require 'thunk)
 
-(setq-local l/a '(:field-a 4 :field-b 5))
-
-(plist-get '(:field-a 4 :field-b 5) :field-b)
-
-(aref (record 'food 4 "a") 2)
-
-(setq-local l (record 'lazy-test/struct 'nil 'nil))
-
-(make-record 'lazy-test 2 'nil)
-
-(defmacro thunk (val)
-  `(lambda () ,val))
-
-(defun lazy-test (a b)
-  (record 'lazy-test (thunk a) (thunk b)))
-
-(defun lazy-test-a (rec)
-  (when (equal 'lazy-test (type-of rec))
-    (aref rec 1)))
-
-(defmacro lazy-struct (name &rest fields)
-  (let ((thunked-fields (-map (lambda (x) `(thunk ,x)) fields)))
+(cl-defmacro lazy-struct (name lazy &rest fields)
+  (let ((thunked-fields (-map (lambda (x) (if lazy `(thunk-delay ,x) x)) fields)))
     `(progn
        (defun ,name ,fields
 	 (record ',name ,@thunked-fields))
+       (defun ,(intern (format "%s-p" name)) (rec)
+	 (equal (type-of rec) ',name))
        ,@(-map-indexed
 	  (lambda (idx field)
-	    `(defun ,(make-symbol (format "%s-%s" name field)) (rec)
-	       (aref rec ,(+ 1 idx))
-	       )
-	    )
+	    `(defun ,(intern (format "%s-%s" name field)) (rec)
+	       (let ((v (aref rec ,(+ 1 idx))))
+		 (if (functionp v)
+		     (thunk-force v)
+		   v))))
 	  fields))))
 
 (macroexpand
- '(lazy-struct my/test a b))
+ '(lazy-struct my/test nil a b))
 
-(lazy-struct my/test2 a b)
-(my/test2-a (my/test2 "a" "b"))
-
-(defstruct-lazy d/empty a b c)
-
-(funcall (lazy-test-a (lazy-test 0 1)))
+(provide 'lazy-struct)
