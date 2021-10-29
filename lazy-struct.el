@@ -27,19 +27,19 @@
     `(progn
        (defun ,name ,fields
 	 (record ',name ,@thunked-fields))
-       (-map-indexed
-	(lambda (idx field)
-	  `(defun ,(make-symbol (format "%s-%s" name field)) ()
-	     (aref)
-	     )
-	  )
-	fields))))
+       ,@(-map-indexed
+	  (lambda (idx field)
+	    `(defun ,(make-symbol (format "%s-%s" name field)) (rec)
+	       (aref rec ,(+ 1 idx))
+	       )
+	    )
+	  fields))))
 
 (macroexpand
  '(lazy-struct my/test a b))
 
-(lazy-struct my/test a b)
-(my/test "a" "b")
+(lazy-struct my/test2 a b)
+(my/test2-a (my/test2 "a" "b"))
 
 (defstruct-lazy d/empty a b c)
 
