@@ -1,7 +1,7 @@
 ;;; -*- lexical-binding: t; -*-
 
 (require 'dash)
-(require 'lazy-struct "~/Research/derivative.el/lazy-struct.el")
+(require 'lazy-struct "~/Development/derivative.el/lazy-struct.el")
 
 (lazy-struct d/empty nil)
 (lazy-struct d/eps nil)
@@ -36,7 +36,7 @@
 (defun d/infer (obj)
   (cl-typecase obj
     (d/langp obj)
-    (symbolp (d/rec obj))
+    (symbolp obj)
     (characterp (d/char (string obj)))
     (stringp (make-word-L obj))))
 
@@ -49,45 +49,62 @@
     (d/alt (or (nullable (d/alt-this L))
 	       (nullable (d/alt-that L))))
     (d/cat (and (nullable (d/cat-left L))
-		(nullable (d/cat-right L))))
-    (d/rec (nullable (d/rec-item L)))))
+		(nullable (d/cat-right L))))))
 
-(defun derivative (c L)
-  (cl-typecase L
-    (d/empty (d/empty))
-    (d/eps (d/empty))
-    (d/char (if (equal c (d/char-value L))
-		(d/eps)
-	      (d/empty)))
-    (d/rep (d/cat (derivative c (d/rep-lang L))
-		  L))
-    (d/alt
-     (let ((l1 (d/alt-this L))
-	   (l2 (d/alt-that L)))
-       (d/alt (derivative c l1)
-	      (derivative c l2))))
-    (d/cat
-     (let ((l1 (d/cat-left L))
-	   (l2 (d/cat-right L)))
-       (if (not (nullable l1))
-	   (d/cat (derivative c l1)
-		  l2)
-	 (d/alt (d/cat (derivative c l1)
-		       l2)
-		(derivative c l2)))))
-    (d/rec
-     (progn
-       (message "L: %s" L)
-       (derivative c (d/rec-item L))))))
+;; (defun memo-nullable (L memo)
+;;   (let ((h (gethash L memo) 'not-in-table))
+;;     (if (equal h 'not-in-table)
+;; 	(puthash L (nullable L) memo)
+;;       h)))
 
-(defun check-word (word L)
+(defun derivative (c L memo)
+  ;; (message "L: %s" L)
+  (let ((prev (gethash `(,c . ,L) memo 'dne)))
+    (if (equal prev 'dne)
+	(let ((res (cl-typecase L
+		     (d/empty (d/empty))
+		     (d/eps (d/empty))
+		     (d/char (if (equal c (d/char-value L))
+				 (d/eps)
+			       (d/empty)))
+		     (d/rep (d/cat (thunk-delay (derivative c (d/rep-lang L) memo))
+				   (thunk-delay L)))
+		     (d/alt
+		      (let ((l1 (d/alt-this L))
+			    (l2 (d/alt-that L)))
+			(d/alt (thunk-delay (derivative c l1 memo))
+			       (thunk-delay (derivative c l2 memo)))))
+		     (d/cat
+		      (let ((l1 (d/cat-left L))
+			    (l2 (d/cat-right L)))
+			(if (not (nullable l1))
+			    (d/cat (thunk-delay (derivative c l1 memo))
+				   (thunk-delay l2))
+			  (d/alt (thunk-delay (d/cat (thunk-delay (derivative c l1 memo))
+						     (thunk-delay l2)))
+				 (thunk-delay (derivative c l2 memo))))))
+		     ;; (d/rec
+		     ;;  (progn
+		     ;; 	;; (message "L: %s" L)
+		     ;; 	;; (message "J: %s" (d/rec-item L))
+		     ;; 	(if (equal (gethash `(,c . ,(d/rec-item L)) memo 'dne) 'dne)
+		     ;; 	    (message "no")
+		     ;; 	    ;; (message "no %s\n%s" (hash-table-keys memo) L)
+		     ;; 	  (message "yes %s" (hash-table-keys memo))
+		     ;; 	  )
+		     ;; 	(d/rec (thunk-delay (derivative c (d/rec-item L) memo)))))
+		     )))
+	  (puthash `(,c . ,L) res memo)
+	  (message "<-" (hash-table-keys memo))
+	  res)
+      prev)))
+
+(defun check-word (word L memo)
   (if (equal word "")
       (nullable L)
     (let ((c (substring word 0 1))
 	  (rest (substring word 1 (string-width word))))
-      (check-word rest (derivative c L)))))
-
-(check-word "hello" (make-word-L "hello"))
+      (check-word rest (derivative c L memo) memo))))
 
 ;; (setq L (make-d/cat :left L
 ;; 		    :right (make-d/alt :this (make-d/char :value "a")
@@ -126,67 +143,86 @@
 (defun c-* (L)
   (d/rep L))
 
-(check-word
- "lambda x . x"
- (c-wscat "lambda" ?x  "." ?x))
-
-(setq L
-      (let* ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
-	     (ws " ")
-	     (binder (c-cat id (c-* (c-cat ws id))))
-	     (plus (c-wscat id "+" id))
-	     (minus (c-wscat id "-" id))
-	     (expr (c-alt plus minus)))
-	;; (c-cat id (c-* (c-cat ws id)))
-	(c-wscat "lambda" binder "." expr)
-	))
-
-(letrec ((id (c-alt ?a ?b))
-	 (expr (c-alt id
-		      (c-wscat (d/rec 'expr) "+" (d/rec 'expr)))))
-  (check-word "a + a" expr)
+(defun resolve (L &optional expr)
+  (if (null expr)
+      (resolve L L)
+    (cl-typecase L
+      (d/rep
+       (progn
+	 (resolve (d/rep-lang L) expr)
+	 (d/rep-setf L expr)))
+      (d/alt
+       (progn
+	 (resolve (d/alt-this L) expr)
+	 (resolve (d/alt-that L) expr)
+	 (d/alt-setf L expr)))
+      (d/cat
+       (progn
+	 (resolve (d/cat-left L) expr)
+	 (resolve (d/cat-right L) expr)
+	 (d/cat-setf L expr))))
+    )
   )
 
-(setq x '(+ x 1))
-(eval x '((x . 0)))
+;; (setq L
+;;       (let* ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
+;; 	     (ws " ")
+;; 	     (binder (c-cat id (c-* (c-cat ws id))))
+;; 	     (plus (c-wscat id "+" id))
+;; 	     (minus (c-wscat id "-" id))
+;; 	     (expr (c-alt plus minus)))
+;; 	;; (c-cat id (c-* (c-cat ws id)))
+;; 	(c-wscat "lambda" binder "." expr)
+;; 	))
 
-(defun unwind (var expr root-expr)
-  (cl-typecase expr
-    (d/empty expr)
-    (d/eps expr)
-    (d/char expr)
-    (d/rep (d/rep (unwind var (d/rep-lang expr) root-expr)))
-    (d/cat (d/cat (unwind var (d/cat-left expr) root-expr)
-		  (unwind var (d/cat-right expr) root-expr)))
-    (d/alt (d/alt (unwind var (d/alt-this expr) root-expr)
-		  (unwind var (d/alt-that expr) root-expr)))
-    (d/rec (if (equal (d/rec-item expr) var)
-	       root-expr
-	     expr))))
+;; (letrec ((id (c-alt ?a ?b))
+;; 	 (expr (c-alt id
+;; 		      (c-wscat (d/rec 'expr) "+" (d/rec 'expr)))))
+;;   (check-word "a + a" expr)
+;;   )
 
-(defun unwind-n (var n expr)
-  (if (zerop n)
-      expr
-    (unwind var (unwind-n var (- n 1) expr) expr)))
+(defun pp-grammar (L top depth)
+  (if (zerop depth)
+      "..."
+    (cl-typecase L
+      (d/empty "emp")
+      (d/eps "eps")
+      (d/char (format "%s" (d/char-value L)))
+      (d/rep (format "(%s)*"
+		     (pp-grammar (d/rep-lang L) top (- depth 1))))
+      (d/alt (format "(%s | %s)"
+		     (if (equal (d/alt-this L) top)
+			 "**"
+		       (pp-grammar (d/alt-this L) top (- depth 1)))
+		     (if (equal (d/alt-that L) top)
+			 "**"
+		       (pp-grammar (d/alt-that L) top (- depth 1)))))
+      (d/cat (format "(%s . %s)"
+		     (if (equal (d/cat-left L) top)
+			 "**"
+		       (pp-grammar (d/cat-left L) top (- depth 1)))
+		     (if (equal (d/cat-right L) top)
+			 "**"
+		       (pp-grammar (d/cat-right L) top (- depth 1)))))) 
+    )
+  )
 
-(let* ((id (c-alt ?a ?b ?c))
-       (expr (c-alt id
-		    (c-wscat 'expr "+" 'expr))))
+(let* ((id (d/char "a"))
+       (expr (c-alt id (c-cat 'rme "+" 'rme)))
+       (memo (make-hash-table :test 'equal)))
+  ;; (message "%s" (aref rexpr 1))
+  (resolve expr)
   ;; (unwind-n 'var 1 var)
-  (check-word "a + a + a"
-	      (unwind-n 'expr 2 expr))
-  ;; expr
+  ;; (check-word "a" expr memo)
+  (--> expr
+       (derivative "a" it memo)
+       (derivative "+" it memo)
+       ;; (derivative "a" it memo)
+       ;; (nullable it)
+       ;; (remove-rec it)
+       ;; (pp-grammar it it 2)
+       )
+  ;; (nullable expr)
   )
-
-
-
-(letrec ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
-	 (plus (c-wscat expr "+" expr))
-	 (minus (c-wscat expr "-" expr))
-	 (expr (c-alt plus minus)))
-  plus
-  )
-
-(check-word "lambda f x y . x + y" L)
 
 (provide 'derivative)
