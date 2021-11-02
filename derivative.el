@@ -2,6 +2,7 @@
 
 (require 'dash)
 (require 'lazy-struct "~/Development/derivative.el/lazy-struct.el")
+(require 's)
 
 (lazy-struct d/empty nil)
 (lazy-struct d/eps nil)
@@ -28,10 +29,9 @@
       (d/rec-p obj)))
 
 (defun make-word-L (word)
-  (if (not (equal word ""))
-      (d/cat (d/char (substring word 0 1))
-	     (make-word-L (substring word 1 (string-width word))))
-    (d/eps)))
+  (if (equal 1 (string-width word))
+      (d/char word)
+    (apply 'c-cat (--map (d/char (string it)) word))))
 
 (defun d/infer (obj)
   (cl-typecase obj
@@ -40,25 +40,22 @@
     (characterp (d/char (string obj)))
     (stringp (make-word-L obj))))
 
-(defun nullable (L)
-  (cl-typecase L
-    (d/empty 'nil)
-    (d/eps 't)
-    (d/char 'nil)
-    (d/rep 't)
-    (d/alt (or (nullable (d/alt-this L))
-	       (nullable (d/alt-that L))))
-    (d/cat (and (nullable (d/cat-left L))
-		(nullable (d/cat-right L))))))
-
-;; (defun memo-nullable (L memo)
-;;   (let ((h (gethash L memo) 'not-in-table))
-;;     (if (equal h 'not-in-table)
-;; 	(puthash L (nullable L) memo)
-;;       h)))
+(cl-defun nullable (L &optional (prev-input (make-hash-table :test 'equal)))
+  (cond ((not (equal (gethash L prev-input 'no) 'no))
+	 'nil)
+	(t (progn
+	     (puthash L (or (d/eps-p L) (d/rep-p L)) prev-input)
+	     (cl-typecase L
+	       (d/empty 'nil)
+	       (d/eps 't)
+	       (d/char 'nil)
+	       (d/rep 't)
+	       (d/alt (or (nullable (d/alt-this L) prev-input)
+			  (nullable (d/alt-that L) prev-input)))
+	       (d/cat (and (nullable (d/cat-left L) prev-input)
+			   (nullable (d/cat-right L) prev-input))))))))
 
 (defun derivative (c L memo)
-  ;; (message "L: %s" L)
   (let ((prev (gethash `(,c . ,L) memo 'dne)))
     (if (equal prev 'dne)
 	(let ((res (cl-typecase L
@@ -82,20 +79,8 @@
 				   (thunk-delay l2))
 			  (d/alt (thunk-delay (d/cat (thunk-delay (derivative c l1 memo))
 						     (thunk-delay l2)))
-				 (thunk-delay (derivative c l2 memo))))))
-		     ;; (d/rec
-		     ;;  (progn
-		     ;; 	;; (message "L: %s" L)
-		     ;; 	;; (message "J: %s" (d/rec-item L))
-		     ;; 	(if (equal (gethash `(,c . ,(d/rec-item L)) memo 'dne) 'dne)
-		     ;; 	    (message "no")
-		     ;; 	    ;; (message "no %s\n%s" (hash-table-keys memo) L)
-		     ;; 	  (message "yes %s" (hash-table-keys memo))
-		     ;; 	  )
-		     ;; 	(d/rec (thunk-delay (derivative c (d/rec-item L) memo)))))
-		     )))
+				 (thunk-delay (derivative c l2 memo)))))))))
 	  (puthash `(,c . ,L) res memo)
-	  (message "<-" (hash-table-keys memo))
 	  res)
       prev)))
 
@@ -126,16 +111,24 @@
 ;;   )
 
 (defun c-alt (&rest args)
-  (if (consp args)
-      (d/alt (d/infer (car args))
-	     (apply 'c-alt (cdr args)))
-    (d/eps)))
+  (cond
+   ((equal 2 (length args))
+    (d/alt (d/infer (car args))
+	   (d/infer (cadr args))))
+   ((consp args)
+    (d/alt (d/infer (car args))
+	   (apply 'c-alt (cdr args))))
+   (t (d/eps))))
 
 (defun c-cat (&rest args)
-  (if (consp args)
-      (d/cat (d/infer (car args))
-	     (apply 'c-cat (cdr args)))
-    (d/eps)))
+  (cond
+   ((equal 2 (length args))
+    (d/cat (d/infer (car args))
+	   (d/infer (cadr args))))
+   ((consp args)
+    (d/cat (d/infer (car args))
+	   (apply 'c-cat (cdr args))))
+   (t (d/eps))))
 
 (defun c-wscat (&rest args)
   (apply 'c-cat (-interpose " " args)))
@@ -143,45 +136,24 @@
 (defun c-* (L)
   (d/rep L))
 
-(defun resolve (L &optional expr)
-  (if (null expr)
-      (resolve L L)
-    (cl-typecase L
+(cl-defun resolve (L &key ((:expr expr) L) ((:sym sym) 'rme))
+  (cl-typecase L
       (d/rep
        (progn
-	 (resolve (d/rep-lang L) expr)
-	 (d/rep-setf L expr)))
+	 (resolve (d/rep-lang L) :expr expr :sym sym)
+	 (d/rep-setf L expr sym)))
       (d/alt
        (progn
-	 (resolve (d/alt-this L) expr)
-	 (resolve (d/alt-that L) expr)
-	 (d/alt-setf L expr)))
+	 (resolve (d/alt-this L) :expr expr :sym sym)
+	 (resolve (d/alt-that L) :expr expr :sym sym)
+	 (d/alt-setf L expr sym)))
       (d/cat
        (progn
-	 (resolve (d/cat-left L) expr)
-	 (resolve (d/cat-right L) expr)
-	 (d/cat-setf L expr))))
-    )
-  )
+	 (resolve (d/cat-left L) :expr expr :sym sym)
+	 (resolve (d/cat-right L) :expr expr :sym sym)
+	 (d/cat-setf L expr sym)))))
 
-;; (setq L
-;;       (let* ((id (c-alt ?a ?b ?c ?d ?e ?f ?g ?x ?y ?z))
-;; 	     (ws " ")
-;; 	     (binder (c-cat id (c-* (c-cat ws id))))
-;; 	     (plus (c-wscat id "+" id))
-;; 	     (minus (c-wscat id "-" id))
-;; 	     (expr (c-alt plus minus)))
-;; 	;; (c-cat id (c-* (c-cat ws id)))
-;; 	(c-wscat "lambda" binder "." expr)
-;; 	))
-
-;; (letrec ((id (c-alt ?a ?b))
-;; 	 (expr (c-alt id
-;; 		      (c-wscat (d/rec 'expr) "+" (d/rec 'expr)))))
-;;   (check-word "a + a" expr)
-;;   )
-
-(defun pp-grammar (L top depth)
+(cl-defun pp-grammar (L &optional (top L) (depth 10))
   (if (zerop depth)
       "..."
     (cl-typecase L
@@ -203,26 +175,17 @@
 		       (pp-grammar (d/cat-left L) top (- depth 1)))
 		     (if (equal (d/cat-right L) top)
 			 "**"
-		       (pp-grammar (d/cat-right L) top (- depth 1)))))) 
-    )
-  )
+		       (pp-grammar (d/cat-right L) top (- depth 1))))))))
 
-(let* ((id (d/char "a"))
-       (expr (c-alt id (c-cat 'rme "+" 'rme)))
+(let* ((id (c-alt "a" "b" "c" "d"))
+       (ops (c-alt "+" "*" "/" "-"))
+       (math-expr (c-alt id (c-wscat 'math-expr ops 'math-expr)))
+       (bind (c-wscat "lambda" id "." 'expr))
+       (expr (c-alt bind math-expr))
        (memo (make-hash-table :test 'equal)))
-  ;; (message "%s" (aref rexpr 1))
-  (resolve expr)
-  ;; (unwind-n 'var 1 var)
-  ;; (check-word "a" expr memo)
-  (--> expr
-       (derivative "a" it memo)
-       (derivative "+" it memo)
-       ;; (derivative "a" it memo)
-       ;; (nullable it)
-       ;; (remove-rec it)
-       ;; (pp-grammar it it 2)
-       )
-  ;; (nullable expr)
-  )
+
+  (resolve math-expr :expr math-expr :sym 'math-expr)
+  (resolve bind :expr expr :sym 'expr)
+  (check-word "lambda a . lambda b . a / b" bind memo))
 
 (provide 'derivative)
