@@ -2,10 +2,8 @@
 
 (require 'thunk)
 
-(cl-defmacro lazy-struct (name lazy &rest fields)
-  (let ((thunked-fields fields
-			;; (-map (lambda (x) (if lazy `(thunk-delay ,x) x)) fields)
-			))
+(cl-defmacro lazy-struct (name &rest fields)
+  (let ((thunked-fields fields))
     `(progn
        (defun ,name ,fields
 	 (record ',name ,@thunked-fields))
@@ -25,13 +23,6 @@
 	      (lambda (idx field)
 		`(when (equal (aref rec ,(+ 1 idx)) sym)
 		   (setf (aref rec ,(+ 1 idx)) thing)))
-	      fields)))
-       )))
-
-(macroexpand
- '(lazy-struct my/test t a))
-
-(lazy-struct my/test t a)
-(my/test-a (my/test 'y))
+	      fields))))))
 
 (provide 'lazy-struct)

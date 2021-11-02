@@ -2,22 +2,14 @@
 
 (require 'dash)
 (require 'lazy-struct "~/Development/derivative.el/lazy-struct.el")
-(require 's)
 
-(lazy-struct d/empty nil)
-(lazy-struct d/eps nil)
-(lazy-struct d/char nil value)
-(lazy-struct d/rep nil lang)
-(lazy-struct d/cat nil left right)
-(lazy-struct d/alt nil this that)
-(lazy-struct d/rec nil item)
-
-;; (cl-defstruct d/empty)
-;; (cl-defstruct d/eps)
-;; (cl-defstruct d/char value)
-;; (cl-defstruct d/rep lang)
-;; (cl-defstruct d/cat left right)
-;; (cl-defstruct d/alt this that)
+(lazy-struct d/empty)
+(lazy-struct d/eps)
+(lazy-struct d/char value)
+(lazy-struct d/rep lang)
+(lazy-struct d/cat left right)
+(lazy-struct d/alt this that)
+(lazy-struct d/rec item)
 
 (defun d/langp (obj)
   (or (d/empty-p obj)
@@ -90,25 +82,6 @@
     (let ((c (substring word 0 1))
 	  (rest (substring word 1 (string-width word))))
       (check-word rest (derivative c L memo) memo))))
-
-;; (setq L (make-d/cat :left L
-;; 		    :right (make-d/alt :this (make-d/char :value "a")
-;; 				       :that (make-d/char :value "b"))))
-
-;; (define-lang L
-;;   ;; (abs (cat (word "lambda")
-;;   ;; 	    binder
-;;   ;; 	    (word ".")
-;;   ;; 	    expr))
-;;   (id (alt (word "a")
-;; 	   (word "b")
-;; 	   (word "c")
-;; 	   (word "x")
-;; 	   (word "y")
-;; 	   (word "z")))
-;;   (ws (word " "))
-;;   (binder (cat id (rep (cat ws id))))
-;;   )
 
 (defun c-alt (&rest args)
   (cond
