@@ -156,9 +156,9 @@
        (bind (c-wscat "lambda" id "." 'expr))
        (expr (c-alt bind math-expr))
        (memo (make-hash-table :test 'equal)))
-
   (resolve math-expr :expr math-expr :sym 'math-expr)
   (resolve bind :expr expr :sym 'expr)
+
   (check-word "lambda a . lambda b . a / b" bind memo))
 
 (provide 'derivative)
